@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
@@ -404,6 +404,8 @@
     canWrite: false,   // true nếu kết nối thành công với server
   };
 
+  const autoSaveTimers = new Map();
+
   const el = id => document.getElementById(id);
 
   function setSyncBadge(text, type = "ok") {
@@ -486,6 +488,41 @@
         winnerSel.appendChild(opt);
       });
 
+      const timeInput = node.querySelector(".time-input");
+
+      const persistNow = async () => {
+        await apiPost("/api/matches/update", {
+          tournament: state.tournament,
+          division: state.division,
+          match_index: match.index,
+          score1: Number(s1Input.value) || 0,
+          score2: Number(s2Input.value) || 0,
+          winner: winnerSel.value,
+          start_time: timeInput.value.trim(),
+        });
+      };
+
+      const scheduleAutoSave = () => {
+        const key = `match-${match.index}`;
+        if (autoSaveTimers.has(key)) {
+          clearTimeout(autoSaveTimers.get(key));
+        }
+
+        setSyncBadge("Đang tự lưu...", "warn");
+        const timer = setTimeout(async () => {
+          try {
+            await persistNow();
+            setSyncBadge("Tự lưu thành công ✓", "ok");
+          } catch (err) {
+            setSyncBadge("Lỗi lưu: " + err.message, "err");
+          } finally {
+            autoSaveTimers.delete(key);
+          }
+        }, 1000);
+
+        autoSaveTimers.set(key, timer);
+      };
+
       node.querySelector(".btn-edit").addEventListener("click", () => {
         editWrap.style.display = "none";
         s1Display.style.display = "none"; s2Display.style.display = "none";
@@ -494,22 +531,24 @@
         s1Input.value = match.score1 ?? 0;
         s2Input.value = match.score2 ?? 0;
         winnerSel.value = [p1, p2].includes(match.winner) ? match.winner : "";
-        node.querySelector(".time-input").value = match.start_time || "";
+        timeInput.value = match.start_time || "";
       });
+
+      s1Input.addEventListener("input", scheduleAutoSave);
+      s2Input.addEventListener("input", scheduleAutoSave);
+      winnerSel.addEventListener("change", scheduleAutoSave);
+      timeInput.addEventListener("input", scheduleAutoSave);
 
       node.querySelector(".btn-save").addEventListener("click", async () => {
         const btn = node.querySelector(".btn-save");
         btn.disabled = true; btn.textContent = "Đang lưu...";
         try {
-          await apiPost("/api/matches/update", {
-            tournament: state.tournament,
-            division: state.division,
-            match_index: match.index,
-            score1: Number(s1Input.value) || 0,
-            score2: Number(s2Input.value) || 0,
-            winner: winnerSel.value,
-            start_time: node.querySelector(".time-input").value.trim(),
-          });
+          const key = `match-${match.index}`;
+          if (autoSaveTimers.has(key)) {
+            clearTimeout(autoSaveTimers.get(key));
+            autoSaveTimers.delete(key);
+          }
+          await persistNow();
           setSyncBadge("Đã lưu ✓", "ok");
           await loadState();
         } catch (err) {
